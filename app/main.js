@@ -20,6 +20,8 @@ const Tray = electron.Tray
 const ipc = electron.ipcMain
 const nativeImage = electron.nativeImage
 const crashReporter = electron.crashReporter
+const remoteMain = require('@electron/remote/main')
+remoteMain.initialize()
 // Manage unhandled exceptions as early as possible
 process.on('uncaughtException', (e) => {
   console.error(`Caught unhandled exception: ${e}`)
@@ -74,18 +76,15 @@ persistantData.set('AIO-Ver', pjson.version)
 crashReporter.start({
   companyName: 'Trevelopment',
   submitURL: 'https://trevelopment.com/crash/bin/mini-breakpad-server',
-  uploadToServer: true,
-  extra: persistantData.store
+  uploadToServer: true
 })
 if (isDev) {
   console.info('Running in development')
   app.setPath('home', path.resolve(`${__dirname}`))
   console.log(`Home: ${app.getPath('home')}`)
-  // console.debug(JSON.stringify(pjson))
   console.debug(JSON.stringify(persistantData.store))
   console.debug(JSON.stringify(pjson.config))
 } else {
-  // console.info('Running in production')
   app.setPath('home', app.getAppPath())
   console.log(`Home: ${app.getPath('home')}`)
 }
@@ -138,17 +137,19 @@ function initialize () {
       'show': false,
       'icon': favicon,
       'webPreferences': {
-        'nodeIntegration': pjson.config.nodeIntegration || true, // Disabling node integration allows to use libraries such as jQuery/React, etc
+        'nodeIntegration': pjson.config.nodeIntegration ?? true,
         'nodeIntegrationInSubFrames': false,
+        'contextIsolation': false,
         'preload': path.resolve(path.join(__dirname, 'preload.js'))
       }
     })
+    remoteMain.enable(win.webContents)
     mainWindowState.manage(win)
     // Remove file:// if you need to load http URLs
     win.loadURL(`file://${__dirname}/${pjson.config.url}`, {})
     win.on('closed', onClosed)
     win.on('unresponsive', function () {
-      var unresponsiveClose = dialog.showMessageBox({
+      var unresponsiveClose = dialog.showMessageBoxSync({
         type: 'warning',
         title: 'Unresponsive',
         detail: '',
@@ -165,23 +166,22 @@ function initialize () {
     if (!isDev) {
       win.setMenuBarVisibility(false)
     }
-    win.webContents.on('did-fail-load', (error, errorCode, errorDescription) => {
+    win.webContents.on('did-fail-load', (event, errorCode, errorDescription) => {
       var errorMessage
       if (errorCode === -105) {
         errorMessage = errorDescription || '[Connection Error] The host name could not be resolved, check your network connection'
         console.log(errorMessage)
       } else {
-        errorMessage = error + ' ' + errorCode + ' - ' + (errorDescription || 'Unknown error')
+        errorMessage = errorCode + ' - ' + (errorDescription || 'Unknown error')
       }
-      error.sender.loadURL(`file://${__dirname}/views/404.html`)
-      win.webContents.on('did-finish-load', () => {
+      event.sender.loadURL(`file://${__dirname}/views/404.html`)
+      win.webContents.once('did-finish-load', () => {
         win.webContents.send('app-error', errorMessage)
       })
     })
-    win.webContents.on('crashed', () => {
-      // In the real world you should display a box and do something
-      dialog.showErrorBox('MZD-AIO-TI has crashed', 'MZD-AIO-TI ERROR')
-      console.error('The window has just crashed')
+    win.webContents.on('render-process-gone', (event, details) => {
+      dialog.showErrorBox('MZD-AIO-TI has crashed', `MZD-AIO-TI ERROR: ${details.reason}`)
+      console.error('The renderer process has gone:', details.reason)
     })
     win.webContents.on('did-finish-load', () => {})
     win.on('ready-to-show', () => {
@@ -236,11 +236,6 @@ function initialize () {
         win.setFullScreen(win.isVisible())
       })
     }
-    // if (isDev) {
-    //   devtools = new BrowserWindow()
-    //   win.webContents.setDevToolsWebContents(devtools.webContents)
-    //   win.webContents.openDevTools({ mode: 'detach' })
-    // }
     return win
   }
   app.on('window-all-closed', () => {
@@ -270,13 +265,12 @@ function initialize () {
     }
     // Manage automatic updates
     try {
-      if (!process.execPath.includes('electron')) { // match(/[\\\/]electron/)) {
+      if (!process.execPath.includes('electron')) {
         require('./lib/auto-update/update.js')({
           url: (pjson.config.update) ? pjson.config.update.url || false : false,
           version: app.getVersion()
         })
         ipc.on('update-downloaded', (autoUpdater) => {
-          // Elegant solution: display unobtrusive notification messages
           mainWindow.webContents.send('update-downloaded')
           ipc.on('update-and-restart', () => {
             autoUpdater.quitAndInstall()
@@ -296,21 +290,12 @@ function initialize () {
   app.on('will-quit', () => {})
   app.on('before-quit', () => {
     var v = Number(persistantData.get('visits')) + 1
-    // save some persistant data
     persistantData.set('visits', v)
   })
+  // Block new windows opened by renderer code (e.g. window.open)
   app.on('web-contents-created', (event, contents) => {
-    contents.on('new-window', (event, url, frameName, disposition, options) => {
-      // event.preventDefault()
-      if(options.webPreferences) {
-        options.webPreferences.nodeIntegration = false
-        //console.dir(options.webPreferences)
-        //console.dir(event)
-        //console.log(url)
-        //console.log(disposition)
-        //console.log(frameName)
-        //console.dir(options)
-      }
+    contents.setWindowOpenHandler(({ url }) => {
+      return { action: 'deny' }
     })
   })
   ipc.on('reset-window-size', () => {
@@ -325,7 +310,10 @@ function initialize () {
       width: 600,
       height: 600,
       icon: favicon,
-      resizable: false
+      resizable: false,
+      webPreferences: {
+        contextIsolation: true
+      }
     })
     infoWindow.loadURL(`file://${__dirname}/views/info.html`)
     infoWindow.on('closed', () => {
@@ -351,10 +339,12 @@ function initialize () {
       parent: mainWindow,
       resizable: true,
       'webPreferences': {
-        'nodeIntegration': pjson.config.nodeIntegration || true,
+        'nodeIntegration': pjson.config.nodeIntegration ?? true,
+        'contextIsolation': false,
         'preload': path.resolve(path.join(__dirname, 'preload.js'))
       }
     })
+    remoteMain.enable(imageJoin.webContents)
     imageJoin.loadURL(`file://${__dirname}/views/joiner.html#joiner`)
     imageJoin.on('did-finish-load', () => {})
     ipc.on('bg-prev', () => {
@@ -393,8 +383,8 @@ async function getUSBDrives () {
   if (typeof dsklst !== 'undefined') {
     dsklst.forEach((drive) => {
       var sizeGB = Math.round(drive.size / 100000000) / 10
-      if (!drive.system && drive.mountpoints[0]) {
-        console.log(`Raw: ${drive.raw}\n Mountpoint: ${drive.mountpoints[0].path}\n Description: ${drive.description}\n Size: ${sizeGB}GB`)
+      if (!drive.isSystem && drive.mountpoints[0]) {
+        console.log(`Device: ${drive.device}\n Mountpoint: ${drive.mountpoints[0].path}\n Description: ${drive.description}\n Size: ${sizeGB}GB`)
         disks.push({ 'desc': drive.description, 'mp': drive.mountpoints[0].path })
       }
     })
@@ -416,11 +406,8 @@ async function getUSBDrives () {
         aioInfo = JSON.parse(aioJSON)
         aioBkups = aioInfo.Backups
         console.log(aioBkups)
-        /* console.log(`FW_VER: ${aioInfo.info.CMU_SW_VER}`)
-        console.log(`AIO_VER: ${aioInfo.info.AIO_VER}`) */
         persistantData.set('FW', aioInfo.info.CMU_SW_VER)
         persistantData.set('last_aio', aioInfo.info.AIO_VER)
-        // _.pullAll(aioBkups)
         if (mainWindow) {
           mainWindow.webContents.send('aio-info')
         }
@@ -428,43 +415,35 @@ async function getUSBDrives () {
     }
   }
 }
-/* function createMenu () {
-  return Menu.buildFromTemplate(require('./lib/menu'))
-} */
-// Manage Squirrel startup event (Windows)
-// require('./lib/auto-update/startup')(initialize)
 
 ipc.on('open-file-bg', function (event) {
   openBGFolder(backgroundDir, event)
 })
 ipc.on('open-file-default', function (event) {
   event.sender.send('selected-bg', defaultDir + 'default.png')
-  // openBGFolder(defaultDir, event)
 })
 
-function openBGFolder (path, event) {
-  dialog.showOpenDialog({
+async function openBGFolder (bgPath, event) {
+  const { filePaths } = await dialog.showOpenDialog({
     title: 'MZD-AIO-TI | Background Image Will Be Resized To: 800 px X 480 px and converted to png format.',
     properties: ['openFile'],
-    defaultPath: path,
+    defaultPath: bgPath,
     filters: [
       { name: 'Background Image', extensions: ['png', 'jpg', 'jpeg'] }
     ]
-  }, function (files) {
-    if (files) { event.sender.send('selected-bg', files) }
   })
+  if (filePaths && filePaths.length) { event.sender.send('selected-bg', filePaths) }
 }
-ipc.on('open-offscreen-bg', function (event) {
-  dialog.showOpenDialog({
+ipc.on('open-offscreen-bg', async function (event) {
+  const { filePaths } = await dialog.showOpenDialog({
     title: 'MZD-AIO-TI | Off Screen Background Image Will Be Resized To: 800 px X 480 px and converted to png format.',
     properties: ['openFile'],
     defaultPath: backgroundDir,
     filters: [
       { name: 'Off Screen Background Image', extensions: ['png', 'jpg', 'jpeg'] }
     ]
-  }, function (files) {
-    if (files) { event.sender.send('selected-offscreen-bg', files) }
   })
+  if (filePaths && filePaths.length) { event.sender.send('selected-offscreen-bg', filePaths) }
 })
 ipc.on('open-offscreen-default', function (event) {
   event.sender.send('selected-offscreen-bg', defaultDir + 'OffScreenBackground.png')
@@ -475,46 +454,43 @@ ipc.on('default-blnk-art', function (event) {
 ipc.on('transparent-blnk-art', function (event) {
   event.sender.send('selected-album-art', blankAlbumArtDir + 'no_artwork_icon_blank.png')
 })
-ipc.on('open-file-blnk-art', function (event) {
-  dialog.showOpenDialog({
+ipc.on('open-file-blnk-art', async function (event) {
+  const { filePaths } = await dialog.showOpenDialog({
     title: 'MZD-AIO-TI | Blank Album Art Image Will Be Resized To: 146 px X 146 px and converted to png format.',
     properties: ['openFile'],
     defaultPath: blankAlbumArtDir,
     filters: [
       { name: 'Blank Album Art', extensions: ['png', 'jpg', 'jpeg'] }
     ]
-  }, function (files) {
-    if (files) { event.sender.send('selected-album-art', files) }
   })
+  if (filePaths && filePaths.length) { event.sender.send('selected-album-art', filePaths) }
 })
-ipc.on('bg-no-resize', (event, arg) => {
-  dialog.showOpenDialog({
+ipc.on('bg-no-resize', async (event, arg) => {
+  const { filePaths } = await dialog.showOpenDialog({
     title: 'MZD-AIO-TI | Choose A Joined Background (Will Not Be Resized).',
     properties: ['openFile'],
     filters: [
       { name: 'Background Image', extensions: ['png', 'jpg', 'jpeg'] }
     ]
-  }, function (files) {
-    if (files) {
-      event.sender.send('selected-joined-bg', files)
-    }
   })
+  if (filePaths && filePaths.length) {
+    event.sender.send('selected-joined-bg', filePaths)
+  }
 })
 ipc.on('theme-jci', function (event) {
   openThemeDialog(event)
 })
 
-function openThemeDialog (event) {
-  dialog.showOpenDialog({
+async function openThemeDialog (event) {
+  const { filePaths } = await dialog.showOpenDialog({
     title: 'MZD-AIO-TI | Choose The JCI Folder From Any Theme Package.',
     properties: ['openDirectory']
-  }, function (files) {
-    if (files) {
-      event.sender.send('custom-theme', files)
-    } else {
-      console.log('No Folder Selected')
-    }
   })
+  if (filePaths && filePaths.length) {
+    event.sender.send('custom-theme', filePaths)
+  } else {
+    console.log('No Folder Selected')
+  }
 }
 // ***********************************  TODO: fix this      *********************
 ipc.on('download-aio-files', (event, arg) => {
@@ -530,7 +506,6 @@ ipc.on('download-aio-files', (event, arg) => {
   if (alreadyDownloaded) {
     mainWindow.webContents.send('already-downloaded')
   } else {
-    // ipc.emit('resume-dl') //TODO: see if this works
     downloadZip(`${fileName}`)
   }
   ipc.once('resume-dl', (event) => {
@@ -543,7 +518,8 @@ ipc.on('download-aio-files', (event, arg) => {
       frame: false,
       focusable: false,
       'webPreferences': {
-        'nodeIntegration': false
+        'nodeIntegration': false,
+        'contextIsolation': true
       }
     })
     resetDL()
@@ -555,26 +531,23 @@ ipc.on('download-aio-files', (event, arg) => {
 
   function resetDL () {
     downloadwin.webContents.session.once('will-download', (event, item, webContents) => {
-      // fileSize = (typeof fileSize === 'undefined') ? item.getTotalBytes() : fileSize;
-      // Set the save path, making Electron not to prompt a save dialog.
       var fileName = item.getFilename()
       item.setSavePath(`${app.getPath('temp')}/${fileName}`)
       var savePath = item.getSavePath()
-      /*   ******         TODO:See if I need this or not maybe just need for testing          ***** */
       if (fs.existsSync(`${savePath}`)) {
         console.log(`${path.resolve(savePath)} Already Exists`)
         item.cancel()
-        extract(`${savePath}`, { dir: `${app.getPath('userData')}` }, function (err) {
-          if (err) { console.error(err) }
+        extract(`${savePath}`, { dir: `${app.getPath('userData')}` }).then(() => {
           fs.unlinkSync(`${savePath}`)
           console.log(`${fileName} unzipped & deleted`)
           mainWindow.webContents.send('notif-progress', `<h3>${fileName} Unzipped</h3>`)
+        }).catch((err) => {
+          console.error(err)
+          mainWindow.webContents.send('notif-progress', `<h3>${fileName} extraction failed: ${err.message}</h3>`)
         })
       }
-      /* *** END *** */
       var fileSize = 107
       if (`${fileName}` === 'speedcam-patch.zip') { fileSize += 80 }
-      // var totalSize = parseInt(`${item.getTotalBytes()}`/1000000)
       item.on('updated', function (event, state) {
         if (state === 'interrupted') {
           mainWindow.webContents.send('notif-progress', 'Download interrupted. Please try again.')
@@ -592,17 +565,19 @@ ipc.on('download-aio-files', (event, arg) => {
       item.once('done', (event, state) => {
         if (state === 'completed') {
           console.log(`${savePath} Downloaded successfully`)
-          extract(`${savePath}`, { dir: `${app.getPath('userData')}` }, function (err) {
-            if (err) { console.error(err) }
+          extract(`${savePath}`, { dir: `${app.getPath('userData')}` }).then(() => {
             fs.unlinkSync(`${savePath}`)
             console.log(`${fileName} unzipped & deleted`)
             mainWindow.webContents.send('notif-progress', `<h3>${fileName} Unzipped</h3>`)
             mainWindow.webContents.send('downzip-complete')
+          }).catch((err) => {
+            console.error(err)
+            mainWindow.webContents.send('notif-progress', `<h3>${fileName} extraction failed: ${err.message}</h3>`)
           })
         } else if (state === 'cancelled') {
           console.log(`${fileName} Download Cancelled.`)
           if (fs.existsSync(`${savePath}`)) {
-            fs.rmdirSync(`${savePath}`)
+            fs.unlinkSync(`${savePath}`)
           }
           mainWindow.webContents.send('notif-progress', `<h3>${fileName} Download Cancelled.</h3>`)
         } else {
