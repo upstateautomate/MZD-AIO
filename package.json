@@ -80,7 +80,7 @@
       "persistantData"
     ],
     "ignore": [
-
+      "app/views/PhotoJoiner_files/**"
     ]
   },
   "jshintConfig": {
