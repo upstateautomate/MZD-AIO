@@ -137,7 +137,7 @@ function initialize () {
       'show': false,
       'icon': favicon,
       'webPreferences': {
-        'nodeIntegration': pjson.config.nodeIntegration || true,
+        'nodeIntegration': pjson.config.nodeIntegration ?? true,
         'nodeIntegrationInSubFrames': false,
         'contextIsolation': false,
         'preload': path.resolve(path.join(__dirname, 'preload.js'))
@@ -339,7 +339,7 @@ function initialize () {
       parent: mainWindow,
       resizable: true,
       'webPreferences': {
-        'nodeIntegration': pjson.config.nodeIntegration || true,
+        'nodeIntegration': pjson.config.nodeIntegration ?? true,
         'contextIsolation': false,
         'preload': path.resolve(path.join(__dirname, 'preload.js'))
       }
@@ -541,7 +541,10 @@ ipc.on('download-aio-files', (event, arg) => {
           fs.unlinkSync(`${savePath}`)
           console.log(`${fileName} unzipped & deleted`)
           mainWindow.webContents.send('notif-progress', `<h3>${fileName} Unzipped</h3>`)
-        }).catch((err) => { console.error(err) })
+        }).catch((err) => {
+          console.error(err)
+          mainWindow.webContents.send('notif-progress', `<h3>${fileName} extraction failed: ${err.message}</h3>`)
+        })
       }
       var fileSize = 107
       if (`${fileName}` === 'speedcam-patch.zip') { fileSize += 80 }
@@ -567,11 +570,14 @@ ipc.on('download-aio-files', (event, arg) => {
             console.log(`${fileName} unzipped & deleted`)
             mainWindow.webContents.send('notif-progress', `<h3>${fileName} Unzipped</h3>`)
             mainWindow.webContents.send('downzip-complete')
-          }).catch((err) => { console.error(err) })
+          }).catch((err) => {
+            console.error(err)
+            mainWindow.webContents.send('notif-progress', `<h3>${fileName} extraction failed: ${err.message}</h3>`)
+          })
         } else if (state === 'cancelled') {
           console.log(`${fileName} Download Cancelled.`)
           if (fs.existsSync(`${savePath}`)) {
-            fs.rmdirSync(`${savePath}`)
+            fs.unlinkSync(`${savePath}`)
           }
           mainWindow.webContents.send('notif-progress', `<h3>${fileName} Download Cancelled.</h3>`)
         } else {
