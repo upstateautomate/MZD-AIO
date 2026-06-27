@@ -162,7 +162,7 @@
     "bluebird-lst": "^1.0.9",
     "copy-dir": "^1.2.0",
     "crlf": "^1.1.1",
-    "drivelist": "^8.0.10",
+    "drivelist": "^9.2.4",
     "electron-context-menu": "^0.14.0",
     "electron-image-resize": "^1.2.4",
     "electron-store": "^4.0.0",

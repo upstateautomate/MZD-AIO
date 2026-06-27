@@ -383,8 +383,8 @@ async function getUSBDrives () {
   if (typeof dsklst !== 'undefined') {
     dsklst.forEach((drive) => {
       var sizeGB = Math.round(drive.size / 100000000) / 10
-      if (!drive.system && drive.mountpoints[0]) {
-        console.log(`Raw: ${drive.raw}\n Mountpoint: ${drive.mountpoints[0].path}\n Description: ${drive.description}\n Size: ${sizeGB}GB`)
+      if (!drive.isSystem && drive.mountpoints[0]) {
+        console.log(`Device: ${drive.device}\n Mountpoint: ${drive.mountpoints[0].path}\n Description: ${drive.description}\n Size: ${sizeGB}GB`)
         disks.push({ 'desc': drive.description, 'mp': drive.mountpoints[0].path })
       }
     })
