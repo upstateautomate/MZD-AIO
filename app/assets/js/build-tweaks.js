@@ -60,12 +60,10 @@ function buildTweakFile (user, apps) {
       aioLog(m, m)
       return
     }
-    mkdirp(`${tmpdir}`, (err) => {
-      if (err) {
-        aioLog(err, err)
-        return
-      }
+    mkdirp.mkdirp(`${tmpdir}`).then(() => {
       buildTweaksConfig(user, apps)
+    }).catch((err) => {
+      aioLog(err, err)
     })
   })
 }

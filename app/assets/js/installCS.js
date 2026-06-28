@@ -3,7 +3,7 @@
 
 const path = require('path')
 const cp = require('child_process')
-const remote = require('electron').remote
+const remote = require('@electron/remote')
 const app = remote.app
 const dialog = remote.dialog
 const isDev = require('electron-is-dev')

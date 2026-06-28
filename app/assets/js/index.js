@@ -11,7 +11,8 @@
 ** ************************************************************************** **
 \* ************************************************************************** */
 /* jshint esversion:8, -W033, -W117, -W097, -W116 */
-const { electron, nativeImage, remote, clipboard, shell } = require('electron')
+const { nativeImage, clipboard, shell } = require('electron')
+const remote = require('@electron/remote')
 const { app, BrowserWindow, dialog } = remote
 const _ = require('lodash')
 const fs = require('fs')

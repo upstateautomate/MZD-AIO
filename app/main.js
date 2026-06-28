@@ -25,8 +25,16 @@ remoteMain.initialize()
 // Manage unhandled exceptions as early as possible
 process.on('uncaughtException', (e) => {
   console.error(`Caught unhandled exception: ${e}`)
+  // Performance timing errors from electron-updater's network request code are
+  // benign and should not crash the app — log and continue
+  if (e instanceof SyntaxError && e.message && e.message.includes('Performance')) {
+    return
+  }
   dialog.showErrorBox('Caught unhandled exception', e.message || 'Unknown error message')
   app.quit()
+})
+process.on('unhandledRejection', (reason) => {
+  console.error('Unhandled rejection:', reason)
 })
 const windowStateKeeper = require('electron-window-state')
 const path = require('path')
